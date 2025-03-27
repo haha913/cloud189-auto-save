@@ -8,8 +8,11 @@ export class Account {
     @Column('text')
     username!: string;
 
-    @Column('text')
+    @Column('text', { nullable: true})
     password!: string;
+
+    @Column('text', { nullable: true})
+    cookies!: string;
 
     @Column('boolean', { default: true })
     isActive!: boolean;
@@ -97,6 +100,18 @@ export class Task {
     
     @Column('text', { nullable: true })
     targetRegex!: string;
+
+    @Column('text', { nullable: true })
+    matchPattern!: string;
+    @Column('text', { nullable: true })
+    matchOperator!: string;
+    @Column('text', { nullable: true })
+    matchValue!: string;
+
+    @Column('integer', { nullable: true })
+    retryCount!: number;
+    @Column('datetime', { nullable: true })
+    nextRetryTime!: Date;
 }
 
 export default { Account, Task };

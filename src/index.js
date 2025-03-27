@@ -8,6 +8,8 @@ const { TaskService } = require('./services/task');
 const { Cloud189Service } = require('./services/cloud189');
 const { MessageUtil } = require('./services/message');
 const { CacheManager } = require('./services/CacheManager')
+const ConfigService = require('./services/ConfigService');
+const packageJson = require('../package.json');
 
 const app = express();
 app.use(express.json());
@@ -17,7 +19,7 @@ app.use(express.static('src/public'));
 app.use(basicAuth({
     users: { [process.env.AUTH_USERNAME]: process.env.AUTH_PASSWORD },
     challenge: true,
-    realm: encodeURIComponent('天翼云盘自动转存系统')
+    realm: encodeURIComponent('天翼云盘自动转存系统'),
 }));
 
 // 初始化数据库连接
@@ -29,18 +31,17 @@ AppDataSource.initialize().then(() => {
     const messageUtil = new MessageUtil();
     // 初始化缓存管理器
     const folderCache = new CacheManager(parseInt(process.env.FOLDER_CACHE_TTL || 600));
-
-
+    
     // 账号相关API
     app.get('/api/accounts', async (req, res) => {
         const accounts = await accountRepo.find();
         // 获取容量
         for (const account of accounts) {
             const cloud189 = Cloud189Service.getInstance(account);
-            const capacity = await cloud189.client.getUserSizeInfo()
+            const capacity = await cloud189.getUserSizeInfo()
             account.capacity = {
-                cloudCapacityInfo: null,
-                familyCapacityInfo: null
+                cloudCapacityInfo: {usedSize:0,totalSize:0},
+                familyCapacityInfo: {usedSize:0,totalSize:0}
             }
             if (capacity && capacity.res_code == 0) {
                 account.capacity.cloudCapacityInfo = capacity.cloudCapacityInfo;
@@ -71,6 +72,21 @@ AppDataSource.initialize().then(() => {
         }
     });
 
+    // 修改账号cookie
+    app.put('/api/accounts/:id/cookie', async (req, res) => {
+        try {
+            const accountId = parseInt(req.params.id);
+            const { cookie } = req.body;
+            const account = await accountRepo.findOneBy({ id: accountId });
+            if (!account) throw new Error('账号不存在');
+            account.cookies = cookie;
+            await accountRepo.save(account);
+            res.json({ success: true });
+        } catch (error) {
+            res.json({ success: false, error: error.message });
+        }
+    })
+
     // 任务相关API
     app.get('/api/tasks', async (req, res) => {
         const tasks = await taskRepo.find({
@@ -81,8 +97,7 @@ AppDataSource.initialize().then(() => {
 
     app.post('/api/tasks', async (req, res) => {
         try {
-            const { accountId, shareLink, targetFolderId, totalEpisodes, accessCode } = req.body;
-            const task = await taskService.createTask(accountId, shareLink, targetFolderId, totalEpisodes, accessCode);
+            const task = await taskService.createTask(req.body);
             res.json({ success: true, data: task });
         } catch (error) {
             res.json({ success: false, error: error.message });
@@ -101,8 +116,8 @@ AppDataSource.initialize().then(() => {
     app.put('/api/tasks/:id', async (req, res) => {
         try {
             const taskId = parseInt(req.params.id);
-            const { resourceName, realFolderId, currentEpisodes, totalEpisodes, status, shareFolderName, shareFolderId } = req.body;
-            const updates = { resourceName, realFolderId, currentEpisodes, totalEpisodes, status, shareFolderName, shareFolderId };
+            const { resourceName, realFolderId, currentEpisodes = 0, totalEpisodes = 0, status, shareFolderName, shareFolderId, matchPattern, matchOperator, matchValue } = req.body;
+            const updates = { resourceName, realFolderId, currentEpisodes, totalEpisodes, status, shareFolderName, shareFolderId, matchPattern, matchOperator, matchValue };
             const updatedTask = await taskService.updateTask(taskId, updates);
             res.json({ success: true, data: updatedTask });
         } catch (error) {
@@ -145,6 +160,9 @@ AppDataSource.initialize().then(() => {
 
             const cloud189 = Cloud189Service.getInstance(account);
             const folders = await cloud189.getFolderNodes(folderId);
+            if (!folders) {
+                throw new Error('获取目录失败');
+            }
             folderCache.set(cacheKey, folders);
             res.json({ success: true, data: folders });
         } catch (error) {
@@ -220,6 +238,9 @@ AppDataSource.initialize().then(() => {
         const result = []
         for (const file of files) {
             const renameResult = await cloud189.renameFile(file.fileId, file.destFileName);
+            if (!renameResult) {
+                throw new Error('重命名失败');
+            }
             if (renameResult.res_code != 0) {
                 result.push(`文件${file.destFileName} ${renameResult.res_msg}`)
             }
@@ -232,27 +253,43 @@ AppDataSource.initialize().then(() => {
         res.json({ success: true, data: result });
     });
 
-    // 获取云盘容量信息
+    app.post('/api/tasks/executeAll', async (req, res) => {
+        await taskService.processAllTasks();
+        res.json({ success: true, data: null });
+    });
+    
+    // 系统设置
+    app.get('/api/settings', async (req, res) => {
+        res.json({success: true, data: ConfigService.getConfig()})
+    })
 
+    app.post('/api/settings', async (req, res) => {
+        const settings = req.body;
+        ConfigService.setConfig(settings)
+        // 修改配置, 重新实例化消息推送
+        messageUtil.updateConfig()
+        res.json({success: true, data: null})
+    })
+
+    app.get('/api/version', (req, res) => {
+        res.json({ version: packageJson.version });
+    });
+    
     // 启动定时任务
     cron.schedule(process.env.TASK_CHECK_INTERVAL, async () => {
         console.log('执行定时任务检查...');
-        const tasks = await taskService.getPendingTasks();
-        let saveResults = []
-        for (const task of tasks) {
-            try {
-            result = await taskService.processTask(task);
-            if (result) {
-                saveResults.push(result)
-            }
-            } catch (error) {
-                console.error(`任务${task.id}执行失败:`, error);
-            }
-        }
-        if (saveResults.length > 0) {
-            messageUtil.sendMessage(saveResults.join("\n\n"))
-        }
+        taskService.processAllTasks();
     });
+
+    const RETRY_CHECK_INTERVAL = 60 * 1000; // 每分钟
+    setInterval(async () => {
+        try {
+            console.log('执行重试任务检查...');
+            await taskService.processRetryTasks();
+        }catch(error) {
+            console.error('处理重试任务时出错:', error);
+        }
+    }, RETRY_CHECK_INTERVAL);
 
     // 启动服务器
     const port = process.env.PORT || 3000;
