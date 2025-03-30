@@ -6,8 +6,8 @@ async function loadSettings() {
             const settings = data.data;
             // 任务设置
             document.getElementById('taskExpireDays').value = settings.task?.taskExpireDays || 3;
-            document.getElementById('taskMaxRetries').value = settings.task?.taskMaxRetries || 300;
-            document.getElementById('taskRetryInterval').value = settings.task?.taskRetryInterval || 3;
+            document.getElementById('taskMaxRetries').value = settings.task?.taskMaxRetries || 3;
+            document.getElementById('taskRetryInterval').value = settings.task?.taskRetryInterval || 300;
 
             // 企业微信设置
             document.getElementById('enableWecom').checked = settings.wecom?.enable || false;
@@ -29,6 +29,11 @@ async function loadSettings() {
             document.getElementById('proxyUsername').value = settings.proxy?.username || '';
             document.getElementById('proxyPassword').value = settings.proxy?.password || '';
 
+            // Bark 设置
+            document.getElementById('enableBark').checked = settings.bark?.enable || false;
+            document.getElementById('barkServerUrl').value = settings.bark?.serverUrl || '';
+            document.getElementById('barkKey').value = settings.bark?.key || '';
+            
         }
     } catch (error) {
         console.error('加载设置失败:', error);
@@ -40,8 +45,8 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
     const settings = {
         task: {
             taskExpireDays: parseInt(document.getElementById('taskExpireDays').value) || 3,
-            taskMaxRetries: parseInt(document.getElementById('taskMaxRetries').value) || 300,
-            taskRetryInterval: parseInt(document.getElementById('taskRetryInterval').value) || 3
+            taskMaxRetries: parseInt(document.getElementById('taskMaxRetries').value) || 3,
+            taskRetryInterval: parseInt(document.getElementById('taskRetryInterval').value) || 300
         },
         wecom: {
             enable: document.getElementById('enableWecom').checked,
@@ -62,10 +67,15 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
             port: parseInt(document.getElementById('proxyPort').value) || 0,
             username: document.getElementById('proxyUsername').value,
             password: document.getElementById('proxyPassword').value
+        },
+        bark: {
+            enable: document.getElementById('enableBark').checked,
+            serverUrl: document.getElementById('barkServerUrl').value,
+            key: document.getElementById('barkKey').value
         }
     };
-    // taskMaxRetries不能少于60秒
-    if (settings.task.taskMaxRetries < 60) {
+    // taskRetryInterval不能少于60秒
+    if (settings.task.taskRetryInterval < 60) {
         alert("任务重试间隔不能小于60秒")
         return 
     }
