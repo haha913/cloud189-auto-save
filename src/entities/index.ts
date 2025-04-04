@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 
 @Entity()
 export class Account {
@@ -32,6 +32,9 @@ export class Account {
         }
     })
     updatedAt!: Date;
+
+    @Column('boolean', { nullable: true, default: false })
+    clearRecycle!: boolean;
 }
 
 @Entity()
@@ -41,6 +44,10 @@ export class Task {
 
     @Column('integer')
     accountId!: number;
+
+    @ManyToOne(() => Account, { nullable: true })
+    @JoinColumn({ name: 'accountId' })
+    account!: Account;
 
     @Column('text')
     shareLink!: string;
@@ -138,6 +145,15 @@ export class Task {
         to: (date: Date) => date
     } })
     nextRetryTime!: Date;
+
+    @Column('text', { nullable: true })
+    remark!: string;
+
+    @Column({ nullable: true })
+    cronExpression!: string;
+
+    @Column({ default: false })
+    enableCron!: boolean;
 }
 
 export default { Account, Task };
