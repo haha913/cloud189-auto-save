@@ -41,7 +41,7 @@ function getTaskById(id) {
 }
 async function fetchTasks() {
     taskList = []
-    const response = await fetch('/api/tasks');
+    const response = await fetch(`/api/tasks`);
     const data = await response.json();
     if (data.success) {
         const tbody = document.querySelector('#taskTable tbody');
@@ -69,15 +69,20 @@ async function fetchTasks() {
                 </tr>
             `;
         });
+        filterTasks()
     }
 }
 
  // 删除任务
  async function deleteTask(id) {
-    if (!confirm('确定要删除这个任务吗？')) return;
-
+    const deleteCloud = document.getElementById('deleteCloudOption').checked;
+    if (!confirm(deleteCloud?'确定要删除这个任务并且从网盘中也删除吗？':'确定要删除这个任务吗？')) return;
     const response = await fetch(`/api/tasks/${id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ deleteCloud })
     });
 
     const data = await response.json();
@@ -129,8 +134,7 @@ async function executeAllTask() {
             method: 'POST'
         });
         if (response.ok) {
-            alert('任务执行完成');
-            fetchTasks();
+            alert('任务已在后台执行, 请稍后查看结果');
         } else {
             alert('任务执行失败');
         }
@@ -143,25 +147,33 @@ async function executeAllTask() {
 }
 
 function openCreateTaskModal() {
+    const lastTargetFolder = getFromCache('lastTargetFolder')
+    if (lastTargetFolder) {
+        const { lastTargetFolderId, lastTargetFolderName } = JSON.parse(lastTargetFolder);
+        document.getElementById('targetFolderId').value = lastTargetFolderId;
+        document.getElementById('targetFolder').value = lastTargetFolderName; 
+    }
     document.getElementsByClassName('cronExpression-box')[0].style.display = 'none';
     document.getElementById('createTaskModal').style.display = 'block';
 }
 
 function closeCreateTaskModal() {
+    document.querySelector('.share-folders-group').style.display = 'none';
+    document.getElementById('shareFoldersList').innerHTML = '';;
     document.getElementById('createTaskModal').style.display = 'none';
     document.getElementById('taskForm').reset();
 }
 
 // 初始化任务表单
 function initTaskForm() {
-    const lastTargetFolder = getFromCache('lastTargetFolder')
-    if (lastTargetFolder) {
-        console.log('lastTargetFolder', lastTargetFolder)
-        const { lastTargetFolderId, lastTargetFolderName } = JSON.parse(lastTargetFolder);
-        document.getElementById('targetFolderId').value = lastTargetFolderId;
-        document.getElementById('targetFolder').value = lastTargetFolderName; 
-    }
      
+    // 使用防抖包装处理函数
+    const debouncedHandleShare = debounce(parseShareLink, 500);
+    const shareInputs = document.querySelectorAll('[data-share-input]');
+    shareInputs.forEach(input => {
+        input.addEventListener('blur', debouncedHandleShare);
+    });
+
     // 修改原有的表单提交处理
     document.getElementById('taskForm').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -169,6 +181,7 @@ function initTaskForm() {
         const shareLink = document.getElementById('shareLink').value;
         const totalEpisodes = document.getElementById('totalEpisodes').value;
         const targetFolderId = document.getElementById('targetFolderId').value;
+        const targetFolder = document.getElementById('targetFolder').value
         const accessCode = document.getElementById('accessCode').value;
         const matchPattern = document.getElementById('matchPattern').value;
         const matchOperator = document.getElementById('matchOperator').value;
@@ -176,7 +189,6 @@ function initTaskForm() {
         const remark = document.getElementById('remark').value;
         const enableCron = document.getElementById('enableCron').checked;
         const cronExpression = document.getElementById('cronExpression').value;
-    
         // 如果填了matchPattern那matchValue就必须填
         if (matchPattern && !matchValue) {
             alert('填了匹配模式, 那么匹配值就必须填');
@@ -186,7 +198,14 @@ function initTaskForm() {
             alert('开启了自定义定时任务, 那么定时表达式就必须填');
             return;
         }
-        const body = { accountId, shareLink, totalEpisodes, targetFolderId, accessCode, matchPattern, matchOperator, matchValue, overwriteFolder: 0, remark, enableCron, cronExpression };
+        // 获取选中的分享目录
+        const selectedFolders = Array.from(document.querySelectorAll('input[name="chooseShareFolder"]:checked'))
+        .map(cb => cb.value);
+        if (selectedFolders.length == 0) {
+            alert('至少选择一个分享目录');
+            return;
+        }
+        const body = { accountId, shareLink, totalEpisodes, targetFolderId, accessCode, matchPattern, matchOperator, matchValue, overwriteFolder: 0, remark, enableCron, cronExpression, targetFolder, selectedFolders };
         await createTask(e,body)
             
     });
@@ -209,7 +228,6 @@ function initTaskForm() {
                 saveToCache('lastTargetFolder', JSON.stringify({ lastTargetFolderId: body.targetFolderId, lastTargetFolderName:  targetFolderName}));
                 document.getElementById('taskForm').reset();
                 document.getElementById('targetFolderId').value = body.targetFolderId;
-                document.getElementById('targetFolder').value = targetFolderName;
                 const ids = data.data.map(item => item.id);
                 await Promise.all(ids.map(id => executeTask(id, false)));
                 alert('任务执行完成');
@@ -246,11 +264,11 @@ async function showFileListModal(taskId) {
     const modal = document.createElement('div');
     modal.className = 'modal files-list-modal'; 
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 1000px;">
+        <div class="modal-content">
             <h3>文件列表</h3>
             <div class='modal-body'>
                 <button class="batch-rename-btn" onclick="showBatchRenameOptions()">批量重命名</button>
-                <div style="max-height: 40vh; overflow-y: auto;">
+                <div class='form-body'>
                 <table>
                     <thead>
                         <tr>
@@ -264,7 +282,7 @@ async function showFileListModal(taskId) {
                 </table>
                 </div>
             </div>
-            <div class="modal-footer">
+            <div class="form-actions">
                 <button onclick="closeFileListModal()">关闭</button>
             </div>
         </div>
@@ -319,7 +337,7 @@ function showBatchRenameOptions() {
                     </label>
                 </div>
                 <div id="renameDescription" class="rename-description">
-                    正则表达式文件重命名。在第一行输入源文件名正则表达式，并在第二行输入新文件名正则表达式。
+                    正则表达式文件重命名。在第一行输入源文件名正则表达式，并在第二行输入新文件名正则表达式。<span class="help-icon" data-tooltip="常用正则表达式示例">?</span>
                 </div>
                 <div id="regexInputs" class="rename-inputs">
                     <div class="form-group">
@@ -353,8 +371,7 @@ function showBatchRenameOptions() {
     const description = modal.querySelector('#renameDescription');
     const regexInputs = modal.querySelector('#regexInputs');
     const sequentialInputs = modal.querySelector('#sequentialInputs')
-    modal.querySelector('.modal-content').style.height = '55vh';
-
+    
     radioButtons.forEach(radio => {
         radio.addEventListener('change', (e) => {
             modal.querySelector('.saveAndAutoUpdate').style.display = 'none';
@@ -421,9 +438,9 @@ function showRenamePreview(newNames, autoUpdate) {
     const modal = document.createElement('div');
     modal.className = 'modal preview-rename-modal';
     modal.innerHTML = `
-        <div class="modal-content" style=" max-width: 1000px;">
+        <div class="modal-content">
             <h3>重命名预览</h3>
-            <div class="preview-container" style="max-height: 40vh; overflow-y: auto;">
+            <div class="form-body">
                 <table>
                     <thead>
                         <tr>
@@ -448,7 +465,6 @@ function showRenamePreview(newNames, autoUpdate) {
             </div>
         </div>
     `;
-    modal.querySelector('.modal-content').style.height = '65vh';
     document.body.appendChild(modal);
     modal.style.display = 'flex';
 }
@@ -495,6 +511,7 @@ async function submitRename(autoUpdate) {
             chooseTask.targetRegex = targetRegex;
             // 刷新文件列表
             showFileListModal(taskId);
+            fetchTasks()
         } else {
             alert('重命名失败: ' + data.error);
         }
@@ -540,18 +557,14 @@ function closeRenamePreviewModal() {
 
 // 处理反斜杠
 function escapeRegExp(regexStr) {
-    return regexStr?regexStr.replace(/\\\\/g, '\\'):'';
+    // 不再处理
+    return regexStr;
 }
 
 // 转义HTML属性中的特殊字符
 function escapeHtmlAttr(str) {
-    if (!str) return '';
-    return str
-        .replace(/\\/g, '\\\\')
-        .replace(/'/g, "\\'")
-        .replace(/"/g, '\\"')
-        .replace(/\n/g, '\\n')
-        .replace(/\r/g, '\\r');
+    // 不再处理
+    return str;
 }
 
 // 初始化表单展开/隐藏功能
@@ -570,14 +583,38 @@ function initFormToggle() {
 }
 
 
+function filterTasks() {
+    const taskFilter = document.getElementById('taskFilter');
+    const taskSearch = document.getElementById('taskSearch');
+    const status = taskFilter.value;
+    const searchText = taskSearch.value.toLowerCase();
+    const tasks = document.querySelectorAll('#taskTable tbody tr');
+    
+    tasks.forEach(task => {
+        const taskStatus = task.getAttribute('data-status');
+        const taskName = task.getAttribute('data-name').toLowerCase();
+        const statusMatch = status === 'all' || status === taskStatus;
+        const searchMatch = !searchText || taskName.includes(searchText);
+        task.style.display = statusMatch && searchMatch ? '' : 'none';
+    });
+}
+
 document.addEventListener('DOMContentLoaded', function() {
-    function debounce(func, wait) {
-        let timeout;
-        return function (...args) {
-            clearTimeout(timeout);
-            timeout = setTimeout(() => func.apply(this, args), wait);
-        };
-    }
+    const dropdownToggle = document.querySelector('.dropdown-toggle');
+    const dropdownGroup = document.querySelector('.dropdown-button-group');
+
+    dropdownToggle.addEventListener('click', function(e) {
+        e.stopPropagation();
+        dropdownGroup.classList.toggle('active');
+    });
+
+    // 点击其他地方关闭下拉菜单
+    document.addEventListener('click', function(e) {
+        if (!dropdownGroup.contains(e.target)) {
+            dropdownGroup.classList.remove('active');
+        }
+    });
+
     const debouncedFilterTasks = debounce(filterTasks, 300);
     // 任务筛选功能
     const taskFilter = document.getElementById('taskFilter');
@@ -589,21 +626,6 @@ document.addEventListener('DOMContentLoaded', function() {
     taskSearch.addEventListener('input', function() {
         debouncedFilterTasks();
     });
-
-    function filterTasks() {
-        const status = taskFilter.value;
-        const searchText = taskSearch.value.toLowerCase();
-        const tasks = document.querySelectorAll('#taskTable tbody tr');
-        
-        tasks.forEach(task => {
-            const taskStatus = task.getAttribute('data-status');
-            const taskName = task.getAttribute('data-name').toLowerCase();
-            const statusMatch = status === 'all' || status === taskStatus;
-            const searchMatch = !searchText || taskName.includes(searchText);
-            task.style.display = statusMatch && searchMatch ? '' : 'none';
-        });
-    }
-
     // 批量选择功能
     const taskTable = document.getElementById('taskTable');
     const batchDeleteBtn = document.getElementById('batchDeleteBtn');
@@ -613,8 +635,10 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!row) return;
         
         row.classList.toggle('selected');
-        const selectedTasks = document.querySelectorAll('#taskTable tbody tr.selected');
-        batchDeleteBtn.style.display = selectedTasks.length > 0 ? '' : 'none';
+        if (batchDeleteBtn) {
+            const selectedTasks = document.querySelectorAll('#taskTable tbody tr.selected');
+            batchDeleteBtn.style.display = selectedTasks.length > 0 ? '' : 'none';
+        }
     });
 });
 
@@ -622,16 +646,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // 批量删除功能
 async function deleteSelectedTasks() {
-    if (!confirm('确定要删除选中的任务吗？')) return;
-
     const selectedTasks = document.querySelectorAll('#taskTable tbody tr.selected');
     const taskIds = Array.from(selectedTasks).map(row => row.getAttribute('data-task-id'));
-
+    if (taskIds.length === 0) {
+        alert('请选择要删除的任务');
+        return;
+    }
+    const deleteCloud = document.getElementById('deleteCloudOption').checked;
+    if (!confirm(deleteCloud?'确定要删除选中任务并且从网盘中也删除吗？':'确定要删除选中的任务吗？')) return;
+    
     try {
         const response = await fetch('/api/tasks/batch', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskIds })
+            body: JSON.stringify({ taskIds, deleteCloud })
         });
 
         const data = await response.json();
@@ -653,6 +681,7 @@ function formatDateTime(dateStr) {
 }
 
 const statusOptions = {
+    pending: '等待中',
     processing: '追剧中',
     completed: '已完结',
     failed: '失败'
@@ -667,4 +696,90 @@ document.getElementById('enableCron').addEventListener('change', function() {
     // 如果为选中 则显示cron表达式输入框
     const cronInput = document.getElementsByClassName('cronExpression-box')[0];
     cronInput.style.display = this.checked? 'block' : 'none';
+});
+
+// 生成STRM
+async function generateStrm() {
+    const selectedTasks = document.querySelectorAll('#taskTable tbody tr.selected');
+    const taskIds = Array.from(selectedTasks).map(row => row.getAttribute('data-task-id'));
+    if (taskIds.length === 0) {
+        alert('请选择要生成STRM的任务');
+        return;
+    }
+    let overwrite = false;
+    if (confirm('是否覆盖已存在的STRM文件')){
+        overwrite = true;
+    }
+    try {
+        const response = await fetch('/api/tasks/strm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ taskIds, overwrite })
+        });
+        const data = await response.json();
+        if (data.success) {
+            alert('任务后台执行中, 请稍后查看结果');
+        } else {
+            alert('生成STRM失败: ' + data.error);
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
+    }
+}
+
+// 解析分享链接获取分享目录组合
+async function parseShareLink() {
+    const shareParseError = document.getElementById('shareParseError');
+    shareParseError.textContent = ''; // 清除之前的错误信息
+    let shareLink = document.getElementById('shareLink')?.value?.trim();
+    let accessCode = document.getElementById('accessCode')?.value?.trim();
+    const accountId = document.getElementById('accountId')?.value;
+    if (!shareLink || !accountId) {
+        return;
+    }
+    // 如果shareLink是https://cloud.189.cn/t/xxxx（访问码：xxx） 需要匹配出url和访问码
+    const regex = /^(https:\/\/cloud\.189\.cn\/t\/[a-zA-Z0-9]+)(?:\s*（访问码：([a-zA-Z0-9]+)）)?$/;
+    const match = regex.exec(shareLink);
+    if (match && match.length >= 2 && match[2]) {
+        shareLink = match[1];
+        accessCode = match[2];
+        document.getElementById('accessCode').value = accessCode;
+    }
+    const shareFoldersGroup = document.querySelector('.share-folders-group');
+    const shareFoldersList = document.getElementById('shareFoldersList');
+    try {
+        const response = await fetch('/api/share/parse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ shareLink, accessCode, accountId })
+        });
+        const data = await response.json();
+        if (data.success) {
+            shareFoldersGroup.style.display = 'block';
+            shareFoldersList.innerHTML = data.data.map(folder => `
+                <div class="folder-item">
+                    <label>
+                        <input type="checkbox" name="chooseShareFolder" value="${folder}" checked>
+                        ${folder}
+                    </label>
+                </div>
+            `).join('');
+        } else {
+            shareFoldersGroup.style.display = 'none';
+            shareFoldersList.innerHTML = '';
+            if (data.error) {
+                shareParseError.textContent = `解析失败: ${data.error}`;
+            }
+        }
+    } catch (error) {
+        shareFoldersGroup.style.display = 'none';
+        shareFoldersList.innerHTML = '';
+        shareParseError.textContent = `操作失败: ${error.message}`;
+    }
+}
+
+// 全选/取消全选处理
+document.getElementById('selectAllFolders').addEventListener('change', function(e) {
+    const checkboxes = document.querySelectorAll('input[name="chooseShareFolder"]');
+    checkboxes.forEach(cb => cb.checked = e.target.checked);
 });

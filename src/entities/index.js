@@ -9,7 +9,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.Task = exports.Account = void 0;
+exports.CommonFolder = exports.Task = exports.Account = void 0;
 const typeorm_1 = require("typeorm");
 let Account = class Account {
 };
@@ -56,6 +56,18 @@ __decorate([
     (0, typeorm_1.Column)('boolean', { nullable: true, default: false }),
     __metadata("design:type", Boolean)
 ], Account.prototype, "clearRecycle", void 0);
+__decorate([
+    (0, typeorm_1.Column)('text', { nullable: true, default: '' }),
+    __metadata("design:type", String)
+], Account.prototype, "localStrmPrefix", void 0);
+__decorate([
+    (0, typeorm_1.Column)('text', { nullable: true, default: '' }),
+    __metadata("design:type", String)
+], Account.prototype, "cloudStrmPrefix", void 0);
+__decorate([
+    (0, typeorm_1.Column)('text', { nullable: true, default: '' }),
+    __metadata("design:type", String)
+], Account.prototype, "embyPathReplace", void 0);
 exports.Account = Account = __decorate([
     (0, typeorm_1.Entity)()
 ], Account);
@@ -215,7 +227,38 @@ __decorate([
     (0, typeorm_1.Column)({ default: false }),
     __metadata("design:type", Boolean)
 ], Task.prototype, "enableCron", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ nullable: true }),
+    __metadata("design:type", String)
+], Task.prototype, "realRootFolderId", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ nullable: true }),
+    __metadata("design:type", String)
+], Task.prototype, "embyId", void 0);
 exports.Task = Task = __decorate([
     (0, typeorm_1.Entity)()
 ], Task);
-exports.default = { Account, Task };
+// 常用目录表
+let CommonFolder = class CommonFolder {
+};
+exports.CommonFolder = CommonFolder;
+__decorate([
+    (0, typeorm_1.Column)('text', { primary: true }),
+    __metadata("design:type", String)
+], CommonFolder.prototype, "id", void 0);
+__decorate([
+    (0, typeorm_1.Column)('integer'),
+    __metadata("design:type", Number)
+], CommonFolder.prototype, "accountId", void 0);
+__decorate([
+    (0, typeorm_1.Column)('text'),
+    __metadata("design:type", String)
+], CommonFolder.prototype, "path", void 0);
+__decorate([
+    (0, typeorm_1.Column)('text'),
+    __metadata("design:type", String)
+], CommonFolder.prototype, "name", void 0);
+exports.CommonFolder = CommonFolder = __decorate([
+    (0, typeorm_1.Entity)()
+], CommonFolder);
+exports.default = { Account, Task, CommonFolder };

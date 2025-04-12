@@ -31,12 +31,19 @@ class Cloud189Service {
     async request(action, body) {
         body.headers = {'Accept': 'application/json;charset=UTF-8'}
         try {
-            return await this.client.request('https://cloud.189.cn' + action, body).json();
+            const noCache = Math.random().toString()
+            return await this.client.request('https://cloud.189.cn' + action+'?noCach='+noCache, body).json();
         }catch (error) {
             if (error instanceof got.HTTPError) {
                 const responseBody = JSON.parse(error.response.body);
                 if (responseBody.res_code === "ShareAuditWaiting") {
                     return responseBody;
+                }
+                if (responseBody.res_code === "FileAlreadyExists") {
+                    return {
+                        res_code: "FileAlreadyExists",
+                        res_msg: "文件已存在"
+                    }
                 }
                 logTaskEvent('请求天翼云盘接口失败:' + error.response.body);
             }else if (error instanceof got.TimeoutError) {
@@ -136,18 +143,17 @@ class Cloud189Service {
 
     // 创建批量执行任务
     async createBatchTask(batchTaskDto) {
-        logTaskEvent("========== 开始创建批量任务 ============")
-        logTaskEvent(`batchTaskDto: ${JSON.stringify(batchTaskDto)}`)
+        logTaskEvent("创建批量任务")
+        logTaskEvent(`batchTaskDto: ${batchTaskDto.toString()}`)
         return await this.request('/api/open/batch/createBatchTask.action', {
             method: 'POST',
             form: batchTaskDto
         })
     }
-
     // 查询转存任务状态
     async checkTaskStatus(taskId, type = "SHARE_SAVE") {
         const params = {taskId, type}
-        return await this.request('/api/open/batch/checkBatchTask.action' , {
+        return await this.request('/api/open/batch/checkBatchTask.action', {
             method: 'POST',
             form: params,
         })
@@ -212,36 +218,24 @@ class Cloud189Service {
     }
 
     // 重命名文件
-    async renameFile(fileId, destFileName) {
-        try {
-            const response = await this.request('/api/open/file/renameFile.action', {
-                method: 'POST',
-                form: {
-                    fileId,
-                    destFileName
-                },
-            })
-            return response
-        }catch(error) {
-            if (error instanceof got.HTTPError) {
-                const responseBody = error.response.body;
-                if (responseBody.res_code === "FileAlreadyExists") {
-                    return {
-                        res_code: "FileAlreadyExists",
-                        res_msg: "文件已存在"
-                    }
-                }
-            }
-            throw error;
-        }
+    async renameFile(fileId, destFileName) { 
+        const response = await this.request('/api/open/file/renameFile.action', {
+            method: 'POST',
+            form: {
+                fileId,
+                destFileName
+            },
+        })
+        return response
     }
     // 获取家庭信息
     async getFamilyInfo() {
         const familyList = await this.client.getFamilyList()
-        if (!familyList || !familyList.length) {
+        if (!familyList || !familyList.familyInfoResp) {
             return null
         }
-        for (const family of familyList) {
+        const resp = familyList.familyInfoResp
+        for (const family of resp) {
             if (family.userRole == 1) {
                 return family
             }

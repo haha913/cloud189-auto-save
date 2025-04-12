@@ -35,6 +35,13 @@ export class Account {
 
     @Column('boolean', { nullable: true, default: false })
     clearRecycle!: boolean;
+
+    @Column('text', { nullable: true, default: ''  })
+    localStrmPrefix!: string;
+    @Column('text', { nullable: true, default: '' })
+    cloudStrmPrefix!: string;
+    @Column('text', { nullable: true, default: '' })
+    embyPathReplace!:string;
 }
 
 @Entity()
@@ -154,6 +161,25 @@ export class Task {
 
     @Column({ default: false })
     enableCron!: boolean;
+
+    @Column({ nullable: true })
+    realRootFolderId!: string;
+
+    @Column({ nullable: true })
+    embyId!: string;
 }
 
-export default { Account, Task };
+// 常用目录表
+@Entity()
+export class CommonFolder {
+    @Column('text', { primary: true })
+    id!: string;
+    @Column('integer')
+    accountId!: number;
+    @Column('text')
+    path!: string;
+    @Column('text')
+    name!: string;
+}
+
+export default { Account, Task, CommonFolder };

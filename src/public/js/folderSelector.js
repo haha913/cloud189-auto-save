@@ -8,6 +8,7 @@ class FolderSelector {
         this.enableFavorites = options.enableFavorites || false; // 是否启用常用目录功能
         this.favoritesKey = options.favoritesKey || 'defaultFavoriteDirectories'; // 常用目录缓存key
         this.isShowingFavorites = false;
+        this.currentPath = []; 
         // API配置
         this.apiConfig = {
             url: options.apiUrl || '/api/folders', // 默认API地址
@@ -28,12 +29,22 @@ class FolderSelector {
     // 保存常用目录
     saveFavorites(favorites) {
         localStorage.setItem(this.favoritesKey, JSON.stringify(favorites));
+        // 调用接口存储常用目录
+        fetch('/api/saveFavorites', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({favorites, accountId:this.accountId}),
+        })
     }
     // 添加到常用目录
     addToFavorites(id, name) {
         const favorites = this.getFavorites();
         if (!favorites.find(f => f.id === id)) {
-            favorites.push({ id, name });
+            // 获取当前选中节点的完整路径
+            const path = this.currentPath.join('/')
+            favorites.push({ id, name, path });
             this.saveFavorites(favorites);
         }
     }
@@ -59,10 +70,10 @@ class FolderSelector {
                             <span class="refresh-icon">🔄</span> 刷新
                         </a>
                     </div>
-                    <div class="modal-body">
+                    <div class="form-body">
                         <div id="${this.treeId}" class="folder-tree"></div>
                     </div>
-                    <div class="modal-footer">
+                    <div class="form-actions">
                         <button class="modal-btn modal-btn-default" data-action="cancel">取消</button>
                         <button class="modal-btn modal-btn-primary" data-action="confirm">确定</button>
                     </div>
@@ -135,7 +146,8 @@ class FolderSelector {
         if (this.selectedNode) {
             this.onSelect({
                 id: this.selectedNode.id,
-                name: this.selectedNode.name
+                name: this.selectedNode.name,
+                path: this.currentPath.join('/') 
             });
             this.close();
         } else {
@@ -179,10 +191,15 @@ class FolderSelector {
                 </span>
             ` : '';
 
+            // 如果是常用目录视图，显示完整路径
+            const displayName = this.isShowingFavorites && node.path ? 
+                `${node.path}/${node.name}` : 
+                node.name;
+
             item.innerHTML = `
                 ${favoriteIcon}
                 <span class="folder-icon">📁</span>
-                <span class="folder-name">${node.name}</span>
+                <span class="folder-name">${displayName}</span>
                 ${expandIcon}
             `;
 
@@ -230,7 +247,27 @@ class FolderSelector {
         }
         this.selectedNode = node;
         element.classList.add('selected');
+
+        // 更新当前路径
+        this.updatePath(element);
     }
+
+    updatePath(element) {
+        this.currentPath = [];
+        let current = element;
+        
+        // 向上遍历DOM树获取完整路径
+        while (current && !current.classList.contains('folder-tree')) {
+            if (current.classList.contains('folder-tree-item')) {
+                const nameElement = current.querySelector('.folder-name');
+                if (nameElement) {
+                    this.currentPath.unshift(nameElement.textContent);
+                }
+            }
+            current = current.parentElement;
+        }
+    }
+
 
     showFavorites(accountId = '') {
         if (accountId) {

@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const { AppDataSource } = require('./database');
-const { Account, Task } = require('./entities');
+const { Account, Task, CommonFolder } = require('./entities');
 const { TaskService } = require('./services/task');
 const { Cloud189Service } = require('./services/cloud189');
 const { MessageUtil } = require('./services/message');
@@ -11,6 +11,10 @@ const packageJson = require('../package.json');
 const session = require('express-session');
 const FileStore = require('session-file-store')(session);
 const { SchedulerService } = require('./services/scheduler');
+const { logTaskEvent, initSSE } = require('./utils/logUtils');
+const { StrmService } = require('./services/strm');
+const { EmbyService } = require('./services/emby');
+const { TelegramBotService } = require('./services/telegramBot');
 
 const app = express();
 app.use(express.json());
@@ -24,7 +28,7 @@ app.use(session({
         logFn: () => {},      // 禁用内部日志
         reapAsync: true,      // 异步清理过期session
     }),
-    secret: process.env.SESSION_SECRET || 'LhX2IyUcMAz2',
+    secret: 'LhX2IyUcMAz2',
     resave: false,
     saveUninitialized: false,
     cookie: { 
@@ -65,8 +69,8 @@ app.get('/login', (req, res) => {
 app.post('/api/auth/login', (req, res) => {
     const { username, password } = req.body;
     
-    if (username === process.env.AUTH_USERNAME && 
-        password === process.env.AUTH_PASSWORD) {
+    if (username === ConfigService.getConfigValue('system.username') && 
+        password === ConfigService.getConfigValue('system.password')) {
         req.session.authenticated = true;
         req.session.username = username;
         res.json({ success: true });
@@ -87,14 +91,48 @@ AppDataSource.initialize().then(async () => {
     console.log('数据库连接成功');
     const accountRepo = AppDataSource.getRepository(Account);
     const taskRepo = AppDataSource.getRepository(Task);
+    const commonFolderRepo = AppDataSource.getRepository(CommonFolder);
     const taskService = new TaskService(taskRepo, accountRepo);
     const messageUtil = new MessageUtil();
+    let tgbot = null;
+    // 初始化机器人
+    if (ConfigService.getConfigValue('telegram.enable') && ConfigService.getConfigValue('telegram.botToken')) {
+        tgbot = new TelegramBotService(ConfigService.getConfigValue('telegram.botToken'));
+        logTaskEvent(`Telegram机器人已启用`);
+    }
+
+    // 初始化消息发送器
+    taskService.onTaskComplete(async (taskCompleteEventDto) => {
+        logTaskEvent(`================触发事件================`);
+        try {
+            const task = taskCompleteEventDto.task
+            // 执行重命名操作
+            await taskService.autoRename(taskCompleteEventDto.cloud189, taskCompleteEventDto.task);
+            const strmService = new StrmService()
+            if (ConfigService.getConfigValue('strm.enable')) {
+                // 处理fileList 将task的名称替换为task的shareFolderName
+                let fileList = taskCompleteEventDto.fileList;
+                const message = await strmService.generate(task, fileList, taskCompleteEventDto.overwriteStrm);
+                messageUtil.sendMessage(message);
+            }
+            if (ConfigService.getConfigValue('emby.enable')) {
+                // 通知Emby
+                const embyService = new EmbyService()                
+                await embyService.notify(task)
+            }
+        } catch (error) {
+            console.log(error)
+            logTaskEvent(`任务完成后处理失败: ${error.message}`);
+        }
+        logTaskEvent(`================事件处理完成================`);
+    });
+
     // 初始化缓存管理器
-    const folderCache = new CacheManager(parseInt(process.env.FOLDER_CACHE_TTL || 600));
-    
+    const folderCache = new CacheManager(parseInt(600));
     // 初始化任务定时器
     await SchedulerService.initTaskJobs(taskRepo, taskService);
     
+
     // 账号相关API
     app.get('/api/accounts', async (req, res) => {
         const accounts = await accountRepo.find();
@@ -113,7 +151,9 @@ AppDataSource.initialize().then(async () => {
             // username脱敏
             account.username = account.username.replace(/(.{3}).*(.{4})/, '$1****$2');
             // 去掉cookies和密码
-            account.cookies = '';
+            if (account.cookies && !account.password) {
+                account.cookies = 'true';
+            }
             account.password = '';
         }
         res.json({ success: true, data: accounts });
@@ -128,6 +168,16 @@ AppDataSource.initialize().then(async () => {
             res.json({ success: false, error: error.message });
         }
     });
+
+     // 清空回收站
+     app.delete('/api/accounts/recycle', async (req, res) => {
+        try {
+            taskService.clearRecycleBin(true, true);
+            res.json({ success: true, data: "ok" });
+        }catch (error) {
+            res.json({ success: false, error: error.message });
+        }
+    })
 
     app.delete('/api/accounts/:id', async (req, res) => {
         try {
@@ -154,7 +204,28 @@ AppDataSource.initialize().then(async () => {
             res.json({ success: false, error: error.message });
         }
     })
-
+    app.put('/api/accounts/:id/strm-prefix', async (req, res) => {
+        try {
+            const accountId = parseInt(req.params.id);
+            const { strmPrefix, type } = req.body;
+            const account = await accountRepo.findOneBy({ id: accountId });
+            if (!account) throw new Error('账号不存在');
+            if (type == 'local') {
+                account.localStrmPrefix = strmPrefix;
+            }
+            if (type == 'cloud') {
+                account.cloudStrmPrefix = strmPrefix;
+            }
+            if (type == 'emby') {
+                account.embyPathReplace = strmPrefix;
+            }
+            await accountRepo.save(account);
+            res.json({ success: true });
+        } catch (error) {
+            res.json({ success: false, error: error.message });
+        }
+    })
+    
     // 任务相关API
     app.get('/api/tasks', async (req, res) => {
         const tasks = await taskRepo.find({
@@ -187,7 +258,8 @@ AppDataSource.initialize().then(async () => {
     app.delete('/api/tasks/batch', async (req, res) => {
         try {
             const taskIds = req.body.taskIds;
-            await taskService.deleteTasks(taskIds);
+            const deleteCloud = req.body.deleteCloud;
+            await taskService.deleteTasks(taskIds, deleteCloud);
             res.json({ success: true });
         } catch (error) {
             res.json({ success: false, error: error.message });
@@ -196,7 +268,8 @@ AppDataSource.initialize().then(async () => {
 
     app.delete('/api/tasks/:id', async (req, res) => {
         try {
-            await taskService.deleteTask(parseInt(req.params.id));
+            const deleteCloud = req.body.deleteCloud;
+            await taskService.deleteTask(parseInt(req.params.id), deleteCloud);
             res.json({ success: true });
         } catch (error) {
             res.json({ success: false, error: error.message });
@@ -216,18 +289,49 @@ AppDataSource.initialize().then(async () => {
 
     app.post('/api/tasks/:id/execute', async (req, res) => {
         try {
-            const task = await taskRepo.findOneBy({ id: parseInt(req.params.id) });
+            const task = await taskRepo.findOne({
+                where: { id: parseInt(req.params.id) },
+                relations: {
+                    account: true
+                },
+                select: {
+                    account: {
+                        username: true,
+                        localStrmPrefix: true,
+                        cloudStrmPrefix: true,
+                        embyPathReplace: true
+                    }
+                }
+            });
             if (!task) throw new Error('任务不存在');
+            logTaskEvent(`================================`);
+            const taskName = task.shareFolderName?(task.resourceName + '/' + task.shareFolderName): task.resourceName || '未知'
+            logTaskEvent(`任务[${taskName}]开始执行`);
             const result = await taskService.processTask(task);
             if (result) {
                 messageUtil.sendMessage(result)
             }
+            logTaskEvent(`任务[${taskName}]执行完成`);
+            logTaskEvent(`================================`);
             res.json({ success: true, data: result });
         } catch (error) {
             res.json({ success: false, error: error.message });
         }
     });
-
+    // 根据任务生成STRM文件
+    app.post('/api/tasks/strm', async (req, res) => {
+        try {
+            const taskIds = req.body.taskIds;
+            if (!taskIds || taskIds.length == 0) {
+                throw new Error('任务ID不能为空');
+            }
+            const overwrite = req.body.overwrite || false;
+            taskService.createStrmFileByTask(taskIds, overwrite);
+            return res.json({ success: true, data: 'ok' });
+        }catch (error) {
+            res.json({ success: false, error: error.message });
+        }
+    })
      // 获取目录树
      app.get('/api/folders/:accountId', async (req, res) => {
         try {
@@ -339,11 +443,14 @@ AppDataSource.initialize().then(async () => {
             task.targetRegex = targetRegex
             taskRepo.save(task)
         }
+        if (result.length > 0) {
+            logTaskEvent(result.join('\n'));
+        }
         res.json({ success: true, data: result });
     });
 
     app.post('/api/tasks/executeAll', async (req, res) => {
-        await taskService.processAllTasks();
+        taskService.processAllTasks(true);
         res.json({ success: true, data: null });
     });
     
@@ -356,17 +463,75 @@ AppDataSource.initialize().then(async () => {
         const settings = req.body;
         SchedulerService.handleScheduleTasks(settings,taskService);
         ConfigService.setConfig(settings)
+        // 如果启用了tg推送, 则初始化tg推送
+        if (settings.telegram?.enable && settings.telegram?.botToken && !tgbot) {
+            tgbot = new TelegramBot(settings.telegram.botToken);
+            logTaskEvent(`Telegram机器人已启用`);
+        }
         // 修改配置, 重新实例化消息推送
         messageUtil.updateConfig()
+        res.json({success: true, data: null})
+    })
+
+    // 保存媒体配置
+    app.post('/api/settings/media', async (req, res) => {
+        const settings = req.body;
+        ConfigService.setConfig(settings)
         res.json({success: true, data: null})
     })
 
     app.get('/api/version', (req, res) => {
         res.json({ version: packageJson.version });
     });
-    
+
+    // 解析分享链接
+    app.post('/api/share/parse', async (req, res) => {
+        try{
+            const shareLink = req.body.shareLink;
+            const accountId = req.body.accountId;
+            const accessCode = req.body.accessCode;
+            const shareFolders = await taskService.parseShareFolderByShareLink(shareLink, accountId, accessCode);
+            res.json({success: true, data: shareFolders})
+        }catch (error) {
+            res.status(500).json({ success: false, error: error.message });
+        }
+    })
+    // 保存常用目录
+    app.post('/api/saveFavorites', async (req, res) => {
+        try{
+            const favorites = req.body.favorites;
+            const accountId = req.body.accountId;
+            if (!accountId) {
+                throw new Error('账号ID不能为空');
+            }
+            // 先删除该账号下的所有常用目录
+            await commonFolderRepo.delete({ accountId: accountId });
+            // 构建新的常用目录数据
+            const commonFolders = favorites.map(favorite => ({
+                accountId: accountId,
+                name: favorite.name,
+                path: favorite.path,
+                id: favorite.id
+            }));
+            if (commonFolders.length == 0) {
+                res.json({ success: true, data: [] });
+                return;
+            }
+            // 批量保存新的常用目录
+            const result = await commonFolderRepo.save(commonFolders);
+            res.json({ success: true, data: result });
+        }catch (error) {
+            res.status(500).json({ success: false, error: error.message });
+        }
+    })
+    // 全局错误处理中间件
+    app.use((err, req, res, next) => {
+        console.error('捕获到全局异常:', err.message);
+        res.status(500).json({ success: false, error: error.message });
+    });
+    initSSE(app)
     // 启动服务器
-    const port = process.env.PORT || 3000;
+    const port = 3000;
     app.listen(port, () => {
         console.log(`服务器运行在 http://localhost:${port}`);
     });
