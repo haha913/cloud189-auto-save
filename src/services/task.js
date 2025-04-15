@@ -7,17 +7,27 @@ const { CreateTaskDto } = require('../dto/TaskDto');
 const { BatchTaskDto } = require('../dto/BatchTaskDto');
 const { TaskCompleteEventDto } = require('../dto/TaskCompleteEventDto');
 const { SchedulerService } = require('./scheduler');
-const EventEmitter = require('events');
+
 const path = require('path');
 const { StrmService } = require('./strm');
+const { EventService } = require('./eventService');
+const { TaskEventHandler } = require('./taskEventHandler');
 
 class TaskService {
     constructor(taskRepo, accountRepo) {
         this.taskRepo = taskRepo;
         this.accountRepo = accountRepo;
         this.messageUtil = new MessageUtil();
+        this.eventService = EventService.getInstance();
 
-        this.eventEmitter = new EventEmitter();
+        // 如果还没有taskComplete事件的监听器，则添加
+        if (!this.eventService.hasListeners('taskComplete')) {
+            const taskEventHandler = new TaskEventHandler(this.messageUtil);
+            this.eventService.on('taskComplete', async (eventDto) => {
+                eventDto.taskService = this;
+                await taskEventHandler.handle(eventDto);
+            });
+        }
     }
 
     // 解析分享码
@@ -80,6 +90,8 @@ class TaskService {
             realRootFolderId: taskDto.realRootFolderId,
             enableCron: taskDto.enableCron,
             cronExpression: taskDto.cronExpression,
+            sourceRegex: taskDto.sourceRegex,
+            targetRegex: taskDto.targetRegex
         };
     }
 
@@ -191,6 +203,10 @@ class TaskService {
         if (!shareInfo.shareId) {
             throw new Error('获取分享信息失败');
         }
+        // 如果任务名称存在 且和shareInfo的name不一致
+        if (taskDto.taskName && taskDto.taskName != shareInfo.fileName) {
+            shareInfo.fileName = taskDto.taskName;
+        }
         // 检查并创建目标目录
         const rootFolder = await this._validateAndCreateTargetFolder(cloud189, taskDto, shareInfo);
         const tasks = [];
@@ -266,6 +282,7 @@ class TaskService {
                 logTaskEvent(`账号不存在，accountId: ${task.accountId}`);
                 throw new Error('账号不存在');
             }
+            task.account = account;
             const cloud189 = Cloud189Service.getInstance(account);
              // 获取分享文件列表并进行增量转存
              const shareDir = await cloud189.listShareDir(task.shareId, task.shareFolderId, task.shareMode,task.accessCode);
@@ -333,7 +350,7 @@ class TaskService {
                 task.lastFileUpdateTime = new Date();
                 task.currentEpisodes = existingMediaCount + fileCount;
                 task.retryCount = 0;
-                this.eventEmitter.emit('taskComplete', new TaskCompleteEventDto({
+                this.eventService.emit('taskComplete', new TaskCompleteEventDto({
                     task,
                     cloud189,
                     fileList: newFiles,
@@ -769,11 +786,6 @@ class TaskService {
             targetFolderId: ''
         });
         await this.createBatchTask(cloud189, batchTaskDto)
-    }
-
-    // 添加事件监听方法
-    onTaskComplete(listener) {
-        this.eventEmitter.on('taskComplete', listener);
     }
 
     // 根据任务创建STRM文件

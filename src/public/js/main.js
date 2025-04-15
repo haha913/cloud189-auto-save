@@ -46,7 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         const accountId = document.getElementById('accountId').value;
         if (!accountId) {
-            alert('请先选择账号');
+            message.warning('请先选择账号');
             return;
         }
         folderSelector.show(accountId);
@@ -57,7 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         const accountId = document.getElementById('accountId').value;
         if (!accountId) {
-            alert('请先选择账号');
+            message.warning('请先选择账号');
             return;
         }
         folderSelector.showFavorites(accountId);
@@ -69,7 +69,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 定时刷新数据
     setInterval(() => {
-        fetchAccounts();
         fetchTasks();
     }, 30000);
 });
@@ -141,3 +140,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 });
+
+function toggleFloatingBtns() {
+    const container = document.getElementById('floatingBtnsContainer');
+    const icon = document.getElementById('toggleIcon');
+    container.classList.toggle('collapsed');
+    icon.classList.toggle('expanded');
+}
