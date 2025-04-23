@@ -2,6 +2,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const ConfigService = require('./ConfigService');
 const { logTaskEvent } = require('../utils/logUtils');
+const CryptoUtils = require('../utils/cryptoUtils');
 
 class StrmService {
     constructor() {
@@ -79,7 +80,14 @@ class StrmService {
                     }
 
                     // 生成STRM文件内容
-                    const content = this._joinUrl(this._joinUrl(task.account.cloudStrmPrefix,taskName),fileName)
+                    let content;
+                    if (task.enableSystemProxy) {
+                        const baseUrl = ConfigService.getConfigValue('system.baseUrl');
+                        const code = CryptoUtils.encryptIds(task.id, file.id);
+                        content = `${baseUrl}/proxy/${code}`;
+                    } else {
+                        content = this._joinUrl(this._joinUrl(task.account.cloudStrmPrefix, taskName), fileName);
+                    }
                     await fs.writeFile(strmPath, content, 'utf8');
                     // 设置文件权限
                     if (process.getuid && process.getuid() === 0) {
@@ -202,6 +210,20 @@ class StrmService {
         // 移除 path 开头的斜杠（如果有）
         path = path.replace(/^\//, '');
         return `${base}/${path}`;
+    }
+
+    // 根据文件名获取STRM文件路径
+    getStrmPath(task) {
+        let taskName = task.realFolderName.substring(task.realFolderName.indexOf('/') + 1);
+        if (!this.enable){
+            // 如果cloudStrmPrefix存在 且不是url地址
+            if (task.account.cloudStrmPrefix && !task.account.cloudStrmPrefix.startsWith('http')) {
+                return path.join(this.baseDir, task.account.cloudStrmPrefix, taskName);
+            }
+        }else{
+            return path.join(this.baseDir, task.account.localStrmPrefix, taskName);
+        }
+        return '';
     }
 }
 

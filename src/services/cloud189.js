@@ -45,6 +45,13 @@ class Cloud189Service {
                         res_msg: "文件已存在"
                     }
                 }
+                // 如果是FileNotFound
+                if (responseBody.res_code === "FileNotFound") {
+                    return {
+                        res_code: "FileNotFound",
+                        res_msg: "文件不存在"
+                    }
+                }
                 logTaskEvent('请求天翼云盘接口失败:' + error.response.body);
             }else if (error instanceof got.TimeoutError) {
                 logTaskEvent('请求天翼云盘接口失败: 请求超时, 请检查是否能访问天翼云盘');
@@ -241,6 +248,34 @@ class Cloud189Service {
             }
         }
         return null
+    }
+    // 获取网盘直链
+    async getDownloadLink(fileId, shareId = null) {
+        const type = shareId? 4: 2
+        const response = await this.request('/api/portal/getNewVlcVideoPlayUrl.action', {
+            method: 'GET',
+            searchParams: {
+                fileId,
+                shareId,
+                type,
+                dt: 1
+            },
+        })
+        if (!response || response.res_code != 0) {
+            throw new Error(response.res_msg)
+        }
+        const code = response.normal.code
+        if (code != 1) {
+            throw new Error(response.normal.message)
+        }
+        const url = response.normal.url
+        const res = await got(url, {
+            followRedirect: false,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0'
+            }
+        })
+        return res.headers.location
     }
 }
 

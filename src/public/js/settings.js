@@ -4,6 +4,10 @@ async function loadSettings() {
         const data = await response.json();
         if (data.success) {
             const settings = data.data;
+            // 项目域名
+            document.getElementById('projectDomain').value = settings.system?.baseUrl || '';
+            // 系统apiKey
+            document.getElementById('systemApiKey').value = settings.system?.apiKey || '';
             // 任务设置
             document.getElementById('taskExpireDays').value = settings.task?.taskExpireDays || 3;
             document.getElementById('taskCheckCron').value = settings.task?.taskCheckCron || '0 19-23 * * *';
@@ -14,6 +18,7 @@ async function loadSettings() {
             document.getElementById('enableAutoClearFamilyRecycle').checked = settings.task?.enableAutoClearFamilyRecycle || false;
             document.getElementById('mediaSuffix').value = settings.task?.mediaSuffix || '.mkv;.iso;.ts;.mp4;.avi;.rmvb;.wmv;.m2ts;.mpg;.flv;.rm;.mov';
             document.getElementById('enableOnlySaveMedia').checked = settings.task?.enableOnlySaveMedia || false;
+            document.getElementById('enableAutoCreateFolder').checked = settings.task?.enableAutoCreateFolder || false;
 
             // 企业微信设置
             document.getElementById('enableWecom').checked = settings.wecom?.enable || false;
@@ -60,6 +65,17 @@ async function loadSettings() {
             document.getElementById('cloudSaverUrl').value = settings.cloudSaver?.baseUrl || '';
             document.getElementById('cloudSaverUsername').value = settings.cloudSaver?.username || '';
             document.getElementById('cloudSaverPassword').value = settings.cloudSaver?.password || '';
+            // 刮削
+            document.getElementById('enableScraper').checked = settings.tmdb?.enableScraper || false;
+            // tmdbkey
+            document.getElementById('tmdbApiKey').value = settings.tmdb?.tmdbApiKey || '';
+
+            // openai配置
+            document.getElementById('enableOpenAI').checked = settings.openai?.enable || false;
+            document.getElementById('openaiBaseUrl').value = settings.openai?.baseUrl || '';
+            document.getElementById('openaiApiKey').value = settings.openai?.apiKey || '';
+            document.getElementById('openaiModel').value = settings.openai?.model || '';
+            document.getElementById('openaiTemplate').value = settings.openai?.rename?.template || '';
         }
     } catch (error) {
         console.error('加载设置失败:', error);
@@ -78,7 +94,8 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
             enableAutoClearRecycle: document.getElementById('enableAutoClearRecycle').checked,
             enableAutoClearFamilyRecycle: document.getElementById('enableAutoClearFamilyRecycle').checked,
             mediaSuffix: document.getElementById('mediaSuffix').value,
-            enableOnlySaveMedia: document.getElementById('enableOnlySaveMedia').checked
+            enableOnlySaveMedia: document.getElementById('enableOnlySaveMedia').checked,
+            enableAutoCreateFolder: document.getElementById('enableAutoCreateFolder').checked
         },
         wecom: {
             enable: document.getElementById('enableWecom').checked,
@@ -111,7 +128,9 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
         },
         system: {
             username: document.getElementById('systemUserName').value,
-            password: document.getElementById('systemPassword').value
+            password: document.getElementById('systemPassword').value,
+            baseUrl: document.getElementById('projectDomain').value,
+            apiKey: document.getElementById('systemApiKey').value
         }
     };
     // taskRetryInterval不能少于60秒
@@ -139,3 +158,12 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
 
 // 在页面加载时初始化设置
 document.addEventListener('DOMContentLoaded', loadSettings);
+
+function generateApiKey() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let apiKey = '';
+    for (let i = 0; i < 32; i++) {
+        apiKey += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    document.getElementById('systemApiKey').value = apiKey;
+}

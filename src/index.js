@@ -1,11 +1,12 @@
 require('dotenv').config();
 const express = require('express');
 const { AppDataSource } = require('./database');
-const { Account, Task, CommonFolder } = require('./entities');
+const { Account, Task, CommonFolder, ProxyFile } = require('./entities');
 const { TaskService } = require('./services/task');
 const { Cloud189Service } = require('./services/cloud189');
 const { MessageUtil } = require('./services/message');
 const { CacheManager } = require('./services/CacheManager')
+const { ProxyFileService } = require('./services/ProxyFileService');
 const ConfigService = require('./services/ConfigService');
 const packageJson = require('../package.json');
 const session = require('express-session');
@@ -15,8 +16,9 @@ const { logTaskEvent, initSSE } = require('./utils/logUtils');
 const TelegramBotManager = require('./utils/TelegramBotManager');
 const fs = require('fs').promises;
 const path = require('path');
-const {default:cloudSaverSdk, setupCloudSaverRoutes, clearCloudSaverToken } = require('./sdk/cloudsaver');
+const { setupCloudSaverRoutes, clearCloudSaverToken } = require('./sdk/cloudsaver');
 const { Like } = require('typeorm');
+const CryptoUtils = require('./utils/cryptoUtils');
 
 const app = express();
 app.use(express.json());
@@ -40,6 +42,11 @@ app.use(session({
 
 // 验证会话的中间件
 const authenticateSession = (req, res, next) => {
+    const apiKey = req.headers['x-api-key'];
+    const configApiKey = ConfigService.getConfigValue('system.apiKey');
+    if (apiKey && configApiKey && apiKey === configApiKey) {
+        return next();
+    }
     if (req.session.authenticated) {
         next();
     } else {
@@ -83,7 +90,10 @@ app.post('/api/auth/login', (req, res) => {
 app.use(express.static('src/public'));
 // 为所有路由添加认证（除了登录页和登录接口）
 app.use((req, res, next) => {
-    if (req.path === '/' || req.path === '/login' || req.path === '/api/auth/login' || req.path.match(/\.(css|js|png|jpg|jpeg|gif|ico)$/)) {
+    if (req.path === '/' || req.path === '/login' 
+        || req.path === '/api/auth/login' 
+        || req.path === '/api/auth/login' 
+        || req.path.match(/\.(css|js|png|jpg|jpeg|gif|ico)$/)) {
         return next();
     }
     authenticateSession(req, res, next);
@@ -108,7 +118,9 @@ AppDataSource.initialize().then(async () => {
     const accountRepo = AppDataSource.getRepository(Account);
     const taskRepo = AppDataSource.getRepository(Task);
     const commonFolderRepo = AppDataSource.getRepository(CommonFolder);
-    const taskService = new TaskService(taskRepo, accountRepo);
+    const proxyFileRepo = AppDataSource.getRepository(ProxyFile);
+    const taskService = new TaskService(taskRepo, accountRepo, proxyFileRepo);
+
     const messageUtil = new MessageUtil();
     // 机器人管理
     const botManager = TelegramBotManager.getInstance();
@@ -117,15 +129,11 @@ AppDataSource.initialize().then(async () => {
         ConfigService.getConfigValue('telegram.bot.botToken'),
         ConfigService.getConfigValue('telegram.bot.enable')
     );
-    // 给机器人注入cloudSaverSdk
-    const tgbot = botManager.getBot();
-if( tgbot){tgbot.cloudSaverSdk = cloudSaverSdk;}
     // 初始化缓存管理器
     const folderCache = new CacheManager(parseInt(600));
     // 初始化任务定时器
     await SchedulerService.initTaskJobs(taskRepo, taskService);
     
-
     // 账号相关API
     app.get('/api/accounts', async (req, res) => {
         const accounts = await accountRepo.find();
@@ -319,8 +327,6 @@ if( tgbot){tgbot.cloudSaverSdk = cloudSaverSdk;}
             if (result) {
                 messageUtil.sendMessage(result)
             }
-            logTaskEvent(`任务[${taskName}]执行完成`);
-            logTaskEvent(`================================`);
             res.json({ success: true, data: result });
         } catch (error) {
             res.json({ success: false, error: error.message });
@@ -413,13 +419,17 @@ if( tgbot){tgbot.cloudSaverSdk = cloudSaverSdk;}
 
      // 获取目录下的文件
      app.get('/api/folder/files', async (req, res) => {
-        const { accountId, folderId } = req.query;
+        const { accountId, taskId } = req.query;
         const account = await accountRepo.findOneBy({ id: accountId });
         if (!account) {
             throw new Error('账号不存在');
         }
+        const task = await taskRepo.findOneBy({ id: taskId });
+        if (!task) {
+            throw new Error('任务不存在');
+        }
         const cloud189 = Cloud189Service.getInstance(account);
-        const fileList =  await taskService.getAllFolderFiles(cloud189, folderId);
+        const fileList =  await taskService.getAllFolderFiles(cloud189, task);
         res.json({ success: true, data: fileList });
     });
     app.post('/api/files/rename', async (req, res) => {
@@ -434,6 +444,10 @@ if( tgbot){tgbot.cloudSaverSdk = cloudSaverSdk;}
         const task = await taskRepo.findOneBy({ id: taskId });
         if (!task) {
             throw new Error('任务不存在');
+        }
+        if(task.enableSystemProxy) {
+            await ProxyFileService.renameFiles(task);
+            res.json({ success: true, data: [] });
         }
         const cloud189 = Cloud189Service.getInstance(account);
         const result = []
@@ -554,6 +568,46 @@ if( tgbot){tgbot.cloudSaverSdk = cloudSaverSdk;}
             res.status(500).json({ success: false, error: error.message });
         }
     })
+    // 获取直链
+    app.get('/api/files/direct-link', async (req, res) => {
+        try{
+            const fileId = req.query.fileId;
+            const taskId = req.query.taskId;
+            const task = await taskRepo.findOneBy({ id: taskId });
+            if (!task) {
+                throw new Error('任务不存在');
+            }
+            const account = await accountRepo.findOneBy({ id: task.accountId });
+            if (!account) {
+                throw new Error('账号不存在');
+            }
+            const cloud189 = Cloud189Service.getInstance(account);
+            const link = await cloud189.getDownloadLink(fileId, task.enableSystemProxy?task.shareId:undefined);
+            res.json({ success: true, data: link });
+        }catch (error) {
+            res.status(500).json({ success: false, error: error.message });
+        }
+    })
+    
+    // 获取直链
+    app.get('/proxy/:code', async(req, res) => {
+        try {
+            const { taskId, fileId } = CryptoUtils.decryptIds(req.params.code);
+            const task = await taskRepo.findOneBy({ id: taskId });
+            if (!task || !task.enableSystemProxy) {
+                return res.status(404).send('Not found');
+            }
+            const account = await accountRepo.findOneBy({ id: task.accountId });
+            if (!account) {
+                return res.status(404).send('Not found');
+            }
+            const cloud189 = await Cloud189Service.getInstance(account);
+            const downloadUrl = await cloud189.getDownloadLink(fileId, task.shareId);
+            res.redirect(downloadUrl);
+        } catch (error) {
+            res.status(500).send('Error');
+        }
+    })
     // 全局错误处理中间件
     app.use((err, req, res, next) => {
         console.error('捕获到全局异常:', err.message);
@@ -564,7 +618,7 @@ if( tgbot){tgbot.cloudSaverSdk = cloudSaverSdk;}
     // 初始化cloudsaver
     setupCloudSaverRoutes(app);
     // 启动服务器
-    const port = 3000;
+    const port = process.env.PORT || 3000;
     app.listen(port, () => {
         console.log(`服务器运行在 http://localhost:${port}`);
     });

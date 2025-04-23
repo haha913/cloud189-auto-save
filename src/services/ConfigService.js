@@ -16,6 +16,8 @@ class ConfigService {
         enableAutoClearFamilyRecycle: false,
         mediaSuffix: '.mkv;.iso;.ts;.mp4;.avi;.rmvb;.wmv;.m2ts;.mpg;.flv;.rm;.mov', // 媒体文件后缀
         enableOnlySaveMedia: false, // 只保存媒体文件
+        // 文件夹不存在时重新创建
+        enableAutoCreateFolder: false,
       },
       wecom: {
         enable: false,
@@ -48,7 +50,9 @@ class ConfigService {
       },
       system: {
         username: 'admin',
-        password: 'admin'
+        password: 'admin',
+        baseUrl: 'http://127.0.0.1:3000',
+        apiKey: ''
       },
       strm: {
         enable: false,
@@ -64,7 +68,17 @@ class ConfigService {
         password: ''
       },
       tmdb: {
+        enableScraper: false,
         apiKey: ''
+      },
+      openai: {
+        enable: false,
+        baseUrl: '',
+        apiKey: '',
+        model: 'GLM-4-Flash-250414',
+        rename: {
+          template: "{name} - {se}{ext}",  // 默认模板
+        }
       }
     };
     this._init();
