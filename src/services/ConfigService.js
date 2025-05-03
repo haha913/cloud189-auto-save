@@ -41,7 +41,12 @@ class ConfigService {
         host: '',
         port: 0,
         username: '',
-        password: ''
+        password: '',
+        services: {
+          telegram: true,
+          tmdb: true,
+          cloud189: false
+        }
       },
       bark: {
         enable: false,
@@ -79,6 +84,11 @@ class ConfigService {
         rename: {
           template: "{name} - {se}{ext}",  // 默认模板
         }
+      },
+      alist: {
+        enable: false,
+        baseUrl: '',
+        apiKey: ''
       }
     };
     this._init();

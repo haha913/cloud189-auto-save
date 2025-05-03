@@ -8,6 +8,15 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "strict": true
-  }
+    "strict": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "allowJs": true,
+  },
+  "include": ["src/**/*"],
+  "exclude": [
+    "vender/cloud189-sdk",
+    "node_modules",
+    "dist"
+  ]
 }

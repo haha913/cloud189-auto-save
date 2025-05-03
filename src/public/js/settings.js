@@ -39,6 +39,9 @@ async function loadSettings() {
             document.getElementById('proxyPort').value = settings.proxy?.port || '';
             document.getElementById('proxyUsername').value = settings.proxy?.username || '';
             document.getElementById('proxyPassword').value = settings.proxy?.password || '';
+            document.getElementById('proxyTelegram').checked = settings.proxy?.services?.telegram || false;
+            document.getElementById('proxyTmdb').checked = settings.proxy?.services?.tmdb || false;
+            document.getElementById('proxyCloud189').checked = settings.proxy?.services?.cloud189 || false;
 
             // Bark 设置
             document.getElementById('enableBark').checked = settings.bark?.enable || false;
@@ -76,6 +79,11 @@ async function loadSettings() {
             document.getElementById('openaiApiKey').value = settings.openai?.apiKey || '';
             document.getElementById('openaiModel').value = settings.openai?.model || '';
             document.getElementById('openaiTemplate').value = settings.openai?.rename?.template || '';
+
+            // alist
+            document.getElementById('enableAlist').checked = settings.alist?.enable || false;
+            document.getElementById('alistServer').value = settings.alist?.baseUrl || '';
+            document.getElementById('alistApiKey').value = settings.alist?.apiKey || '';
         }
     } catch (error) {
         console.error('加载设置失败:', error);
@@ -119,7 +127,12 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
             host: document.getElementById('proxyHost').value,
             port: parseInt(document.getElementById('proxyPort').value) || 0,
             username: document.getElementById('proxyUsername').value,
-            password: document.getElementById('proxyPassword').value
+            password: document.getElementById('proxyPassword').value,
+            services:{
+                telegram: document.getElementById('proxyTelegram').checked,
+                tmdb: document.getElementById('proxyTmdb').checked,
+                cloud189: document.getElementById('proxyCloud189').checked
+            }
         },
         bark: {
             enable: document.getElementById('enableBark').checked,

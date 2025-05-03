@@ -1,7 +1,8 @@
-const { CloudClient, FileTokenStore } = require('cloud189-sdk');
+const { CloudClient, FileTokenStore } = require('../../vender/cloud189-sdk/dist');
 const { logTaskEvent } = require('../utils/logUtils');
 const crypto = require('crypto');
 const got = require('got');
+const ProxyUtil = require('../utils/ProxyUtil');
 class Cloud189Service {
     static instances = new Map();
 
@@ -23,8 +24,16 @@ class Cloud189Service {
             _options.ssonCookie = account.cookies
             _options.password = null   
         }
+        _options.proxy = ProxyUtil.getProxy('cloud189')
         this.client = new CloudClient(_options);
-       
+    }
+
+    // 重新给所有实例设置代理
+    static setProxy() {
+        const proxyUrl = ProxyUtil.getProxy('cloud189')
+        this.instances.forEach(instance => {
+            instance.client.setProxy(proxyUrl);
+        });
     }
 
     // 封装统一请求
