@@ -30,7 +30,8 @@ class ConfigService {
         chatId: '',
         bot: {
           enable: false,
-          botToken: ''
+          botToken: '',
+          chatId: ''
         }
       },
       wxpusher: {
@@ -91,13 +92,15 @@ class ConfigService {
         model: 'GLM-4-Flash-250414',
         rename: {
           template: "{name} - {se}{ext}",  // 默认模板
+          movieTemplate: "{name} ({year}){ext}",  // 电影模板
         }
       },
       alist: {
         enable: false,
         baseUrl: '',
         apiKey: ''
-      }
+      },
+      customPush: [] // 自定义推送
     };
     this._init();
   }

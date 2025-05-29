@@ -1,3 +1,4 @@
+let customPushConfigs = []
 async function loadSettings() {
     try {
         const response = await fetch('/api/settings');
@@ -41,8 +42,9 @@ async function loadSettings() {
             document.getElementById('proxyPassword').value = settings.proxy?.password || '';
             document.getElementById('proxyTelegram').checked = settings.proxy?.services?.telegram || false;
             document.getElementById('proxyTmdb').checked = settings.proxy?.services?.tmdb || false;
+            document.getElementById('proxyOpenAI').checked = settings.proxy?.services?.openai || false;
             document.getElementById('proxyCloud189').checked = settings.proxy?.services?.cloud189 || false;
-
+            document.getElementById('proxyCustomPush').checked = settings.proxy?.services?.customPush || false;
             // Bark 设置
             document.getElementById('enableBark').checked = settings.bark?.enable || false;
             document.getElementById('barkServerUrl').value = settings.bark?.serverUrl || '';
@@ -63,7 +65,7 @@ async function loadSettings() {
             // tg机器人设置
             document.getElementById('enableTgBot').checked = settings.telegram?.bot?.enable || false;
             document.getElementById('tgBotToken').value = settings.telegram?.bot?.botToken || '';
-
+            document.getElementById('tgBotChatId').value = settings.telegram?.bot?.chatId || '';
             // cloudSaver设置
             document.getElementById('cloudSaverUrl').value = settings.cloudSaver?.baseUrl || '';
             document.getElementById('cloudSaverUsername').value = settings.cloudSaver?.username || '';
@@ -79,6 +81,7 @@ async function loadSettings() {
             document.getElementById('openaiApiKey').value = settings.openai?.apiKey || '';
             document.getElementById('openaiModel').value = settings.openai?.model || '';
             document.getElementById('openaiTemplate').value = settings.openai?.rename?.template || '';
+            document.getElementById('openaiMovieTemplate').value = settings.openai?.rename?.movieTemplate || '';
 
             // alist
             document.getElementById('enableAlist').checked = settings.alist?.enable || false;
@@ -92,6 +95,8 @@ async function loadSettings() {
             document.getElementById('pushplusChannel').value = settings.pushplus?.channel || '';
             document.getElementById('pushplusWebhook').value = settings.pushplus?.webhook || '';
             document.getElementById('pushplusTo').value = settings.pushplus?.to || '';
+
+            customPushConfigs = settings.customPush || [];
         }
     } catch (error) {
         console.error('加载设置失败:', error);
@@ -100,6 +105,10 @@ async function loadSettings() {
 
 document.getElementById('settingsForm').addEventListener('submit', async (e) => {
     e.preventDefault();
+    saveSettings()
+});
+
+async function saveSettings() {
     const settings = {
         task: {
             taskExpireDays: parseInt(document.getElementById('taskExpireDays').value) || 3,
@@ -124,7 +133,8 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
             chatId: document.getElementById('telegramChatId').value,
             bot: {
                 enable: document.getElementById('enableTgBot').checked,
-                botToken: document.getElementById('tgBotToken').value
+                botToken: document.getElementById('tgBotToken').value,
+                chatId: document.getElementById('tgBotChatId').value
             }
         },
         wxpusher: {
@@ -139,7 +149,9 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
             services:{
                 telegram: document.getElementById('proxyTelegram').checked,
                 tmdb: document.getElementById('proxyTmdb').checked,
-                cloud189: document.getElementById('proxyCloud189').checked
+                openai: document.getElementById('proxyOpenAI').checked,
+                cloud189: document.getElementById('proxyCloud189').checked,
+                customPush: document.getElementById('proxyCustomPush').checked
             }
         },
         bark: {
@@ -161,6 +173,7 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
             webhook: document.getElementById('pushplusWebhook').value,
             to: document.getElementById('pushplusTo').value
         },
+        customPush: customPushConfigs
     };
     // taskRetryInterval不能少于60秒
     if (settings.task.taskRetryInterval < 60) {
@@ -176,14 +189,14 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
         });
         const data = await response.json();
         if (data.success) {
-            message.success('设置保存成功');
+            message.success('保存成功');
         } else {
-            message.warning('设置保存失败: ' + data.error);
+            message.warning('保存失败: ' + data.error);
         }
     } catch (error) {
-        message.warning('设置保存失败: ' + error.message);
+        message.warning('保存失败: ' + error.message);
     }
-});
+}
 
 // 在页面加载时初始化设置
 document.addEventListener('DOMContentLoaded', loadSettings);

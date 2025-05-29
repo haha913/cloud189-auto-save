@@ -23,6 +23,7 @@ const cors = require('cors');
 const { EmbyService } = require('./services/emby');
 const { StrmService } = require('./services/strm');
 const AIService = require('./services/ai');
+const CustomPushService = require('./services/message/CustomPushService');
 
 const app = express();
 app.use(cors({
@@ -112,6 +113,9 @@ app.use((req, res, next) => {
 });
 // 初始化数据库连接
 AppDataSource.initialize().then(async () => {
+    // 当前版本:
+    const currentVersion = packageJson.version;
+    console.log(`当前系统版本: ${currentVersion}`);
     console.log('数据库连接成功');
 
     // 初始化 STRM 目录权限
@@ -140,6 +144,7 @@ AppDataSource.initialize().then(async () => {
     // 初始化机器人
     await botManager.handleBotStatus(
         ConfigService.getConfigValue('telegram.bot.botToken'),
+        ConfigService.getConfigValue('telegram.bot.chatId'),
         ConfigService.getConfigValue('telegram.bot.enable')
     );
     // 初始化缓存管理器
@@ -337,6 +342,20 @@ AppDataSource.initialize().then(async () => {
         }
     });
 
+    // 删除任务文件
+    app.delete('/api/tasks/files', async (req, res) => {
+        try{
+            const { taskId, files } = req.body;
+            if (!files || files.length === 0) {
+                throw new Error('未选择要删除的文件');
+            }
+            await taskService.deleteFiles(taskId, files);
+            res.json({ success: true, data: null });
+        }catch (error) {
+            res.json({ success: false, error: error.message });
+        }
+    })
+
     app.delete('/api/tasks/:id', async (req, res) => {
         try {
             const deleteCloud = req.body.deleteCloud;
@@ -509,20 +528,11 @@ AppDataSource.initialize().then(async () => {
         const strmService = new StrmService();
         const strmEnabled = ConfigService.getConfigValue('strm.enable') && task.account.localStrmPrefix
         if (strmEnabled && task.enableSystemProxy){
-            let oldFilesName = files.map(file => path.join(folderName, file.oldName));
-            for (const file of oldFilesName) {
-                strmService.delete(path.join(task.account.localStrmPrefix, file))
-            }
+            throw new Error('系统代理模式已移除');
         }
         const newFiles = files.map(file => ({id: file.fileId, name: file.destFileName}))
         if(task.enableSystemProxy) {
-            await proxyFileService.batchUpdateFiles(newFiles);
-            // 重新生成STRM文件
-            if (strmEnabled){
-                strmService.generate(task, newFiles, false, false)
-            }
-            res.json({ success: true, data: [] });
-            return;
+            throw new Error('系统代理模式已移除');
         }
         const cloud189 = Cloud189Service.getInstance(account);
         const result = []
@@ -538,9 +548,9 @@ AppDataSource.initialize().then(async () => {
                 if (strmEnabled){
                     // 从realFolderName中获取文件夹名称 删除对应的本地文件
                     const oldFile = path.join(folderName, file.oldName);
-                    strmService.delete(path.join(task.account.localStrmPrefix, oldFile))
+                    await strmService.delete(path.join(task.account.localStrmPrefix, oldFile))
                 }
-                successFiles.push(file)
+                successFiles.push({id: file.fileId, name: file.destFileName})
             }
         }
         // 重新生成STRM文件
@@ -563,20 +573,6 @@ AppDataSource.initialize().then(async () => {
         res.json({ success: true, data: null });
     });
 
-    // 删除任务文件
-    app.delete('/api/tasks/files', async (req, res) => {
-        try{
-            const { taskId, files } = req.body;
-            if (!files || files.length === 0) {
-                throw new Error('未选择要删除的文件');
-            }
-            await taskService.deleteFiles(taskId, files);
-            res.json({ success: true, data: null });
-        }catch (error) {
-            res.json({ success: false, error: error.message });
-        }
-    })
-    
     // 系统设置
     app.get('/api/settings', async (req, res) => {
         res.json({success: true, data: ConfigService.getConfig()})
@@ -612,7 +608,7 @@ AppDataSource.initialize().then(async () => {
     })
 
     app.get('/api/version', (req, res) => {
-        res.json({ version: packageJson.version });
+        res.json({ version: currentVersion });
     });
 
     // 解析分享链接
@@ -671,42 +667,11 @@ AppDataSource.initialize().then(async () => {
             res.status(500).json({ success: false, error: error.message });
         }
     })
-    // 获取直链
-    app.get('/api/files/direct-link', async (req, res) => {
-        try{
-            const fileId = req.query.fileId;
-            const taskId = req.query.taskId;
-            const task = await taskRepo.findOneBy({ id: taskId });
-            if (!task) {
-                throw new Error('任务不存在');
-            }
-            const account = await accountRepo.findOneBy({ id: task.accountId });
-            if (!account) {
-                throw new Error('账号不存在');
-            }
-            const cloud189 = Cloud189Service.getInstance(account);
-            const link = await cloud189.getDownloadLink(fileId, task.enableSystemProxy?task.shareId:undefined);
-            res.json({ success: true, data: link });
-        }catch (error) {
-            res.status(500).json({ success: false, error: error.message });
-        }
-    })
     
     // 获取直链
     app.get('/proxy/:code', async(req, res) => {
         try {
-            const { taskId, fileId } = CryptoUtils.decryptIds(req.params.code);
-            const task = await taskRepo.findOneBy({ id: taskId });
-            if (!task || !task.enableSystemProxy) {
-                return res.status(404).send('Not found');
-            }
-            const account = await accountRepo.findOneBy({ id: task.accountId });
-            if (!account) {
-                return res.status(404).send('Not found');
-            }
-            const cloud189 = await Cloud189Service.getInstance(account);
-            const downloadUrl = await cloud189.getDownloadLink(fileId, task.shareId);
-            res.redirect(downloadUrl);
+            throw new Error('系统代理模式已移除');
         } catch (error) {
             res.status(500).send('Error');
         }
@@ -795,6 +760,20 @@ AppDataSource.initialize().then(async () => {
             )
             return res.json({ success: true, data: await taskService.handleAiRename(files, resourceInfo) });
         } catch (error) {
+            res.json({ success: false, error: error.message });
+        }
+    })
+
+    app.post('/api/custom-push/test', async (req, res) => {
+        try{
+            const configTest = req.body
+            if (await new CustomPushService([]).testPush(configTest)){
+                res.json({ success: true, data: null });
+            }else{
+                res.json({ success: false, error: '推送测试失败' });
+            }
+
+        }catch (error) {
             res.json({ success: false, error: error.message });
         }
     })
